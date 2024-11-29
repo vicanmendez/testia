@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        h1 {
+            color: #333;
+        }
+        #webcam-container {
+            margin: 20px auto;
+            display: flex;
+            justify-content: center;
+            border: 4px solid #333;
+            border-radius: 10px;
+        }
+        #label-container {
+            margin: 20px auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .prediction-text {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            text-align: center;
+        }
+        .keys {
+            color: #3498db; /* Azul para llaves */
+        }
+        .phone {
+            color: #e74c3c; /* Rojo para teléfono */
+        }
+        .unknown {
+            color: #95a5a6; /* Gris para cuando no está seguro */
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            background: #333;
+            color: white;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>Teachable Machine Image Model</h1>
+    <div>Modelo de clasificación de llaves y teléfonos</div>
+    <button type="button" id="start-button" onclick="init()">Empezar</button>
+    <button type="button" id="stop-button" onclick="stop()" disabled>Terminar</button>
+    <div id="webcam-container"></div>
+    <div id="label-container"></div>
+    <div id="resultado" class="prediction-text">Esperando...</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <script type="text/javascript">
+        const URL = "./my_model/";
+
+        let model, webcam, labelContainer, maxPredictions;
+        let isPredicting = false;
+
+        // Cargar el modelo y configurar la webcam
+        async function init() {
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            model = await tmImage.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
+
+            // Eliminar cualquier canvas anterior si existe
+            if (webcam) {
+                stop();  // Llamar a stop() para detener cualquier webcam previa y limpiar
+            }
+
+            // Configurar la cámara web centrada
+            const flip = true;
+            webcam = new tmImage.Webcam(400, 400, flip); // Ancho, alto, flip
+            await webcam.setup(); 
+            await webcam.play();
+            window.requestAnimationFrame(loop);
+
+            // Limpiar contenedor antes de agregar nueva cámara
+            document.getElementById("webcam-container").innerHTML = "";
+            document.getElementById("webcam-container").appendChild(webcam.canvas);
+
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = ""; // Limpiar etiquetas anteriores
+            for (let i = 0; i < maxPredictions; i++) {
+                labelContainer.appendChild(document.createElement("div"));
+            }
+
+            // Actualizar los botones
+            document.getElementById("start-button").disabled = true;
+            document.getElementById("stop-button").disabled = false;
+            isPredicting = true;
+        }
+
+        // Función de bucle para realizar predicciones mientras la cámara está encendida
+        async function loop() {
+            if (isPredicting) {
+                webcam.update();
+                await predict();
+                window.requestAnimationFrame(loop);
+            }
+        }
+
+        // Detener la cámara y las predicciones
+        function stop() {
+            if (webcam) {
+                webcam.stop(); // Detener la cámara
+                webcam = null; // Eliminar referencia de la cámara
+            }
+            isPredicting = false;
+
+            // Limpiar el contenedor de la webcam y etiquetas
+            document.getElementById("webcam-container").innerHTML = "";
+            document.getElementById("label-container").innerHTML = "";
+            
+            // Actualizar el estado del resultado
+            document.getElementById("resultado").textContent = "Predicciones detenidas.";
+            document.getElementById("resultado").className = "prediction-text unknown";
+
+            // Actualizar botones
+            document.getElementById("start-button").disabled = false;
+            document.getElementById("stop-button").disabled = true;
+        }
+
+        // Realizar predicciones con el modelo
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+
+            let llaves = 0;
+            let telefono = 0;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                const className = prediction[i].className;
+                const probability = prediction[i].probability.toFixed(2);
+
+                if (className === "llave") {
+                    llaves = parseFloat(probability);
+                }
+                if (className === "telefono") {
+                    telefono = parseFloat(probability);
+                }
+
+                // Actualizar contenedor de etiquetas con probabilidades
+                const classPrediction = className + ": " + probability;
+                labelContainer.childNodes[i].innerHTML = classPrediction;
+            }
+
+            // Determinar cuál es la predicción dominante con umbral de 0.8
+            updatePredictionText(llaves, telefono);
+        }
+
+        // Función para actualizar el texto basado en las probabilidades
+        function updatePredictionText(llaves, telefono) {
+            const resultadoElement = document.getElementById("resultado");
+            const umbral = 0.9;
+
+            // Definir qué mostrar en base a las probabilidades con umbral de 0.8
+            if (llaves > telefono && llaves >= umbral) {
+                resultadoElement.textContent = "Me estás mostrando unas llaves";
+                resultadoElement.className = "prediction-text keys";
+            } else if (telefono > llaves && telefono >= umbral) {
+                resultadoElement.textContent = "Me estás mostrando un teléfono";
+                resultadoElement.className = "prediction-text phone";
+            } else {
+                resultadoElement.textContent = "No sé lo que me estás mostrando";
+                resultadoElement.className = "prediction-text unknown";
+            }
+        }
+    </script>
+</body>
+</html>
